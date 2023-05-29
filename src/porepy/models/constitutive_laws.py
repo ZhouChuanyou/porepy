@@ -488,7 +488,7 @@ class FluidDensityFromPressure:
 
         # Reference variables are defined in a variables class which is assumed
         # to be available by mixin.
-        dp = self.perturbation_from_reference("pressure", subdomains)
+        dp = self.pressure(subdomains) - 1.01325e5
 
         # Wrap compressibility from fluid class as matrix (left multiplication with dp)
         c = self.fluid_compressibility(subdomains)
@@ -553,7 +553,7 @@ class FluidDensityFromTemperature:
 
         # Reference variables are defined in a variables class which is assumed
         # to be available by mixin.
-        dtemp = self.perturbation_from_reference("temperature", subdomains)
+        dtemp = self.temperature(subdomains) - 288
         return exp(Scalar(-1) * Scalar(self.fluid.thermal_expansion()) * dtemp)
 
 
@@ -672,6 +672,16 @@ class ConstantViscosity:
 
     """
 
+    def fluid_viscosity_formula(self, T):
+        # return 0.1
+        API = 10.0
+        A1 = -0.8021
+        A2 = 23.8765
+        A3 = 0.31458
+        A4 = -9.21592
+        Tf = 1.8 * (T - 273.15) + 32.0  # temperature in Fahrenheit
+        return (Tf ** (A3 * API + A4) * 10.0 ** (A1 * API + A2)) * 1e-3
+
     def fluid_viscosity(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
         """Fluid viscosity [Pa s].
 
@@ -684,7 +694,9 @@ class ConstantViscosity:
             picked from the fluid constants.
 
         """
-        return Scalar(self.fluid.viscosity(), "viscosity")
+
+        T = self.temperature(subdomains)
+        return self.fluid_viscosity_formula(T)
 
 
 class ConstantPermeability:
@@ -1856,7 +1868,7 @@ class EnthalpyFromTemperature(SpecificHeatCapacities):
 
         """
         c = self.fluid_specific_heat_capacity(subdomains)
-        enthalpy = c * self.perturbation_from_reference("temperature", subdomains)
+        enthalpy = c * self.temperature(subdomains)
         enthalpy.set_name("fluid_enthalpy")
         return enthalpy
 

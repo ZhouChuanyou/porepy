@@ -209,7 +209,6 @@ class EnergyBalanceEquations(pp.BalanceEquation):
         """
         energy = (
             self.fluid_density(subdomains) * self.fluid_enthalpy(subdomains)
-            - self.pressure(subdomains)
         ) * self.porosity(subdomains)
         energy.set_name("fluid_internal_energy")
         return energy

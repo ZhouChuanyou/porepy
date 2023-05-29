@@ -373,7 +373,7 @@ class Operator:
                 msg = self._get_error_message("subtracting", op.children, results)
                 raise ValueError(msg) from exc
 
-        elif operation == Operator.Operations.mul:
+        elif operation in (Operator.Operations.mul, Operator.Operations.rmul):
             # To multiply we need two objects
             assert len(results) == 2
 
