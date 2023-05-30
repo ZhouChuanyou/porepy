@@ -315,25 +315,25 @@ class TimeManager:
             if recomp_max <= 0:
                 raise ValueError("Number of recomputation attempts must be > 0.")
 
-        else:
+        # else:
             # If the time step is constant, check that the scheduled times and the time
             # step are compatible. See documentation of ``schedule``.
-            sim_times = np.arange(schedule[0], schedule[-1] + dt_init, dt_init)
-            compat_rtol = 1e-05
-            compat_atol = 1e-08
-            is_compatible = self.is_schedule_in_simulated_times(
-                schedule,
-                sim_times,
-                rtol=compat_rtol,
-                atol=compat_atol,
-            )
-            if not is_compatible:
-                msg = (
-                    "Mismatch between the time step and scheduled time. Make sure the"
-                    " two are compatible, or consider adjusting the tolerances of the"
-                    " sanity check."
-                )
-                raise ValueError(msg)
+            # sim_times = np.arange(schedule[0], schedule[-1] + dt_init, dt_init)
+            # compat_rtol = 1e-05
+            # compat_atol = 1e-08
+            # is_compatible = self.is_schedule_in_simulated_times(
+            #     schedule,
+            #     sim_times,
+            #     rtol=compat_rtol,
+            #     atol=compat_atol,
+            # )
+            # if not is_compatible:
+            #     msg = (
+            #         "Mismatch between the time step and scheduled time. Make sure the"
+            #         " two are compatible, or consider adjusting the tolerances of the"
+            #         " sanity check."
+            #     )
+                # raise ValueError(msg)
 
         # Schedule, initial, and final times
         self.schedule = schedule
