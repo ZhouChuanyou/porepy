@@ -553,7 +553,7 @@ class FluidDensityFromTemperature:
 
         # Reference variables are defined in a variables class which is assumed
         # to be available by mixin.
-        dtemp = self.temperature(subdomains) - 288
+        dtemp = self.temperature(subdomains) - 288.7056
         return exp(Scalar(-1) * Scalar(self.fluid.thermal_expansion()) * dtemp)
 
 
@@ -1913,7 +1913,7 @@ class EnthalpyFromTemperature(SpecificHeatCapacities):
 
         """
         c = self.solid_specific_heat_capacity(subdomains)
-        enthalpy = c * self.perturbation_from_reference("temperature", subdomains)
+        enthalpy = c * self.temperature(subdomains)
         enthalpy.set_name("solid_enthalpy")
         return enthalpy
 
