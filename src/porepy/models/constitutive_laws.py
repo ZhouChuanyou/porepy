@@ -696,7 +696,10 @@ class ConstantViscosity:
         """
 
         T = self.temperature(subdomains)
-        return self.fluid_viscosity_formula(T)
+        val = self.fluid_viscosity_formula(T)
+        val.set_name('fluid_viscosity')
+        return val
+        # return T / T * self.fluid.viscosity()
 
 
 class ConstantPermeability:

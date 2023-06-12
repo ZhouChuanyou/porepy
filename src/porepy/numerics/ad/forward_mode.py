@@ -294,6 +294,7 @@ class AdArray:
 
         if isinstance(other, (int, float)):
             # This is a polynomial, use standard rules for differentiation.
+            # with np.errstate(all='raise'):
             new_val = self.val**other
             # Left-multiply jac with a diagonal-matrix version of the differentiated
             # polynomial, this will give the desired column-wise scaling of the
