@@ -296,7 +296,7 @@ class Operator:
         #    and then perform the operation on the result.
 
         # Check for case 1 or 2
-        if isinstance(op, pp.ad.Variable) or isinstance(op, Variable):
+        if isinstance(op, Variable):
             # Case 1: Variable
 
             # How to access the array of (Ad representation of) states depends on

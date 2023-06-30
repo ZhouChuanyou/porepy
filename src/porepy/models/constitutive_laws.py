@@ -488,7 +488,7 @@ class FluidDensityFromPressure:
 
         # Reference variables are defined in a variables class which is assumed
         # to be available by mixin.
-        dp = self.pressure(subdomains) - 1.01325e5
+        dp = self.pressure(subdomains) - 1.01325e5*1e-6
 
         # Wrap compressibility from fluid class as matrix (left multiplication with dp)
         c = self.fluid_compressibility(subdomains)
