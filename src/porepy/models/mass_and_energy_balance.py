@@ -19,10 +19,10 @@ class EquationsFluidMassAndEnergy(
         Call both parent classes' set_equations methods.
 
         """
-        # Mass balance
-        mass.MassBalanceEquations.set_equations(self)
         # Energy balance
         energy.EnergyBalanceEquations.set_equations(self)
+        # Mass balance
+        mass.MassBalanceEquations.set_equations(self)
 
 
 class VariablesFluidMassAndEnergy(
@@ -38,8 +38,8 @@ class VariablesFluidMassAndEnergy(
 
         """
         # Energy balance
-        mass.VariablesSinglePhaseFlow.create_variables(self)
         energy.VariablesEnergyBalance.create_variables(self)
+        mass.VariablesSinglePhaseFlow.create_variables(self)
 
 
 class ConstitutiveLawFluidMassAndEnergy(

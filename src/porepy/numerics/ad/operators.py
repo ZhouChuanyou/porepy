@@ -224,6 +224,8 @@ class Operator:
                     # creates a copy of the operator.
                     # If other time-dependent other operators are added, they will have
                     # to override this previous_timestep method.
+
+                    # WE HAVE A BUG HERE IF PREV_ITER IS INCLUDED 
                     return op.previous_timestep()
 
                 else:
@@ -1649,6 +1651,8 @@ class Variable(Operator):
             with its ``prev_iter`` attribute set to ``True``.
 
         """
+        if self.prev_iter or self.prev_time:
+            raise ValueError
         ndof: dict[Literal["cells", "faces", "nodes"], int] = {
             "cells": self._cells,
             "faces": self._faces,
@@ -1702,6 +1706,7 @@ class MixedDimensionalVariable(Variable):
         self.id = next(Variable._ids)
         """ID counter. Used to identify variables during operator parsing."""
 
+        # self.id == 109
         self.prev_time: bool = False
         """Flag indicating if the variable represents the state at the previous time
         step.
@@ -1800,6 +1805,10 @@ class MixedDimensionalVariable(Variable):
         """
         if self.prev_time:
             return self
+        
+        # BUG
+        if self.prev_iter:
+            return Scalar(0)
 
         new_subs = [var.previous_timestep() for var in self.sub_vars]
         new_var = MixedDimensionalVariable(new_subs)
