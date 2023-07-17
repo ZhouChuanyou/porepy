@@ -439,7 +439,7 @@ class BoundaryConditionsSinglePhaseFlow:
             boundary_faces = self.domain_boundary_sides(sd).all_bf
             # Append to list of boundary values
             vals = np.zeros(sd.num_faces)
-            vals[boundary_faces] = self.fluid.density() / self.fluid_viscosity_formula(self.TEMPERATURE_INLET)
+            vals[boundary_faces] = self.fluid.density() / self.fluid.viscosity()
             bc_values.append(vals)
 
         # Concatenate to single array and wrap as ad.DenseArray
