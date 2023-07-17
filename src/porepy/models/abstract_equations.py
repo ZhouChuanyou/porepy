@@ -89,7 +89,7 @@ class BalanceEquation:
         """
 
         dt_operator = pp.ad.time_derivatives.dt
-        dt = pp.ad.TimeDependentDenseArray('time_step_value', subdomains=subdomains)
+        dt = self.ad_time_step
         div = pp.ad.Divergence(subdomains, dim=dim)
         return dt_operator(accumulation, dt) + div @ surface_term - source
 
