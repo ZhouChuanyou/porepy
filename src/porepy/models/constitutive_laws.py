@@ -2221,6 +2221,7 @@ class PressureStress(LinearElasticMechanicalStress):
         discr = pp.ad.BiotAd(self.stress_keyword, subdomains)
         # The stress is simply found by the grad_p operator, multiplied with the
         # pressure perturbation.
+        # TODO: Why we don't multiply by Biot constant?
         stress: pp.ad.Operator = (
             discr.grad_p @ self.pressure(subdomains)
             # The reference pressure is only defined on sd_primary, thus there is no
