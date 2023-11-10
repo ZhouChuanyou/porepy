@@ -20,6 +20,8 @@ import porepy as pp
 
 logger = logging.getLogger(__name__)
 
+from porepy.numerics.ad.operators import OPERATORS_CACHE
+
 
 class SolutionStrategy(abc.ABC):
     """This is a class that specifies methods that a model must implement to
@@ -423,6 +425,7 @@ class SolutionStrategy(abc.ABC):
             solution_vector: The new solution, as computed by the non-linear solver.
 
         """
+        OPERATORS_CACHE.clear()
         self._nonlinear_iteration += 1
         self.equation_system.shift_iterate_values()
         self.equation_system.set_variable_values(
