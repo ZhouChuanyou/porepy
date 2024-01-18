@@ -124,9 +124,9 @@ model.exporter.write_vtu([model.pressure_variable])
 
 # Some remarks:
 # For this particular setting:
-# - The problem being approximated is linear the scalar field (pressure)
-# - The Mass flux and Volumetric Darcy flux coincides.
-# - Only employing the method bc_values_darcy_flux leads to the correct approximation,
+# - The problem being approximated is linear in the scalar field (pressure);
+# - The Mass flux and Volumetric Darcy flux coincide;
+# - By employing the method bc_values_darcy_flux leads to the correct approximation;
 #   while employing the method bc_values_fluid_flux leads to an incorrect approximation.
 
 # Computing relative l2 error
