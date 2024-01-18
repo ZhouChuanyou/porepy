@@ -13,7 +13,7 @@ class ModifiedGeometry:
         self._domain = nd_cube_domain(dimension, size)
 
     def grid_type(self) -> str:
-        return self.params.get("grid_type", "simplex")
+        return self.params.get("grid_type", "cartesian")
 
     def meshing_arguments(self) -> dict:
         cell_size = self.solid.convert_units(0.01, "m")
@@ -27,19 +27,19 @@ class SinglePhaseFlowGeometry(
     """Combining the modified geometry and the default model."""
     ...
 
-
-
-# Pressure fuction at boundary
-def p_D(xv):
+# Manufacture solution data
+def p_exact(xv):
     x,y,z = xv
     val = (1 - x)*x*(y**2)*np.sin(2*np.pi*x)
     return val
 
+# right hand side source
 def f_rhs(xv):
     x,y,z = xv
     val = 4*np.pi*(-1 + 2*x)*(y**2)*np.cos(2*np.pi*x) + 2*((y**2) + (-1 + x)*x*(1 - 2*(np.pi**2)*(y**2)))*np.sin(2*np.pi*x)
     return val
 
+# normal flux at y = 1.0
 def qn_at_top_bc(xv):
     x,y,z = xv
     val = -2*(1 - x)*x*y*np.sin(2*np.pi*x)
@@ -48,24 +48,35 @@ def qn_at_top_bc(xv):
 class ModifiedBC(BoundaryConditionsSinglePhaseFlow):
 
     def bc_type_darcy_flux(self, sd: pp.Grid) -> pp.BoundaryCondition:
-        """Assign dirichlet to the west and east boundaries. The rest are Neumann by default."""
+        """Assign dirichlet to the west, south and east boundaries. The rest are Neumann by default."""
         bounds = self.domain_boundary_sides(sd)
-        bc = pp.BoundaryCondition(sd, bounds.all_bf, "dir")
+        bc_idx = bounds.west + bounds.south + bounds.east
+        bc = pp.BoundaryCondition(sd, bc_idx, "dir")
         return bc
 
     def bc_values_pressure(self, boundary_grid: pp.BoundaryGrid) -> np.ndarray:
-        """Zero bc value on top and bottom, 5 on west side, 2 on east side."""
         bounds = self.domain_boundary_sides(boundary_grid)
+        bc_idx = bounds.west + bounds.south + bounds.east
         values = np.zeros(boundary_grid.num_cells)
         xc = boundary_grid.cell_centers.T
-        values[bounds.all_bf] = np.array(list(map(p_D, xc)))
+        values[bc_idx] = np.array(list(map(p_exact, xc)))[bc_idx]
         return values
 
-    # def bc_values_fluid_flux(self, sd: pp.Grid) -> pp.BoundaryCondition:
-    #     """Assign dirichlet to the west and east boundaries. The rest are Neumann by default."""
-    #     bounds = self.domain_boundary_sides(sd)
-    #     bc = pp.BoundaryCondition(sd, bounds.west, "dir")
-    #     return bc
+    # def bc_values_darcy_flux(self, boundary_grid: pp.BoundaryGrid) -> pp.BoundaryCondition:
+    #     bounds = self.domain_boundary_sides(boundary_grid)
+    #     bc_idx = bounds.north
+    #     values = np.zeros(boundary_grid.num_cells)
+    #     xc = boundary_grid.cell_centers.T
+    #     values[bc_idx] = (boundary_grid.cell_volumes * np.array(list(map(qn_at_top_bc, xc))))[bc_idx]
+    #     return values
+
+    def bc_values_fluid_flux(self, boundary_grid: pp.BoundaryGrid) -> pp.BoundaryCondition:
+        bounds = self.domain_boundary_sides(boundary_grid)
+        bc_idx = bounds.north
+        values = np.zeros(boundary_grid.num_cells)
+        xc = boundary_grid.cell_centers.T
+        values[bc_idx] = (boundary_grid.cell_volumes * np.array(list(map(qn_at_top_bc, xc))))[bc_idx]
+        return values
 
 
 class ModifiedSource:
@@ -107,9 +118,24 @@ solid_constants = pp.SolidConstants({"permeability": 1.0, "porosity": 0.0})
 material_constants = {"fluid": fluid_constants, "solid": solid_constants}
 params = {"material_constants": material_constants}
 
-
 model = SinglePhaseFlowGeometryBC(params)
 pp.run_time_dependent_model(model, params)
 model.exporter.write_vtu([model.pressure_variable])
 
-# pp.plot_grid(model.mdg, "pressure", figsize=(10, 8), linewidth=0.25, title="Pressure distribution", plot_2d=True)
+# Notes about what is being inconsistent:
+# For this particular setting:
+# - The problem being approximated is linear the scalar field (pressure)
+# - The Mass flux and Volumetric Darcy flux coincides.
+# - Only employing the method bc_values_darcy_flux leads to the correct approximation,
+#   while employing the method bc_values_fluid_flux leads to an incorrect approximation.
+
+# Computing relative l2 error
+dimension = 2
+data = model.mdg.subdomains(True, dimension)
+p_h = data[0][1]['time_step_solutions']['pressure'][0]
+p_e = np.array(list(map(p_exact, data[0][0].cell_centers.T)))
+sol_norm = np.sqrt(np.sum((p_e) * (p_e) * data[0][0].cell_volumes))
+rel_error = (p_h - p_e) / sol_norm
+rel_l2_error = np.sqrt(np.sum(rel_error * rel_error * data[0][0].cell_volumes))
+print("Exact solution norm : ", sol_norm)
+print("Relative l2_error in pressure: ", rel_l2_error)
