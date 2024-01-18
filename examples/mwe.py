@@ -122,7 +122,7 @@ model = SinglePhaseFlowGeometryBC(params)
 pp.run_time_dependent_model(model, params)
 model.exporter.write_vtu([model.pressure_variable])
 
-# Notes about what is being inconsistent:
+# Some remarks:
 # For this particular setting:
 # - The problem being approximated is linear the scalar field (pressure)
 # - The Mass flux and Volumetric Darcy flux coincides.
