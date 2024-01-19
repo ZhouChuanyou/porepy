@@ -4,6 +4,7 @@ import numpy as np
 from porepy.models.fluid_mass_balance import SinglePhaseFlow
 from porepy.models.fluid_mass_balance import BoundaryConditionsSinglePhaseFlow
 from porepy.applications.md_grids.domains import nd_cube_domain
+# from porepy.constitutive_laws import FluidDensityFromPressure
 
 class ModifiedGeometry:
     def set_domain(self) -> None:
@@ -13,7 +14,7 @@ class ModifiedGeometry:
         self._domain = nd_cube_domain(dimension, size)
 
     def grid_type(self) -> str:
-        return self.params.get("grid_type", "cartesian")
+        return self.params.get("grid_type", "simplex")
 
     def meshing_arguments(self) -> dict:
         cell_size = self.solid.convert_units(0.01, "m")
@@ -27,22 +28,30 @@ class SinglePhaseFlowGeometry(
     """Combining the modified geometry and the default model."""
     ...
 
+# Paremeter to control the nonlinearity in rho, eta in [0,45]
+global_eta = 45.0
+
 # Manufacture solution data
 def p_exact(xv):
     x,y,z = xv
     val = (1 - x)*x*(y**2)*np.sin(2*np.pi*x)
     return val
 
-# right hand side source
-def f_rhs(xv):
+# Right hand side source
+def f_rhs(xv, m_eta = global_eta):
     x,y,z = xv
-    val = 4*np.pi*(-1 + 2*x)*(y**2)*np.cos(2*np.pi*x) + 2*((y**2) + (-1 + x)*x*(1 - 2*(np.pi**2)*(y**2)))*np.sin(2*np.pi*x)
+    val = 2*((-1 + x)*x*np.sin(2*np.pi*x) + 5*((-1 + x)**3)*(x**3)*(y**4)*m_eta*
+      (np.sin(2*np.pi*x)**3) + (-1 + x)*x*(y**6)*m_eta*np.sin(2*np.pi*x)*
+      ((2*np.pi*(-1 + x)*x*np.cos(2*np.pi*x) + (-1 + 2*x)*np.sin(2*np.pi*x))**2) +
+     (y**2)*(2*np.pi*(1 - 2*x)*np.cos(2*np.pi*x) +
+        (-1 + 2*(np.pi**2)*(-1 + x)*x)*np.sin(2*np.pi*x))*
+      (-1 - ((-1 + x)**2)*(x**2)*(y**4)*m_eta*(np.sin(2*np.pi*x)**2)))
     return val
 
-# normal flux at y = 1.0
-def qn_at_top_bc(xv):
+# Normal flux at y = 1.0
+def qn_at_top_bc(xv, m_eta = global_eta):
     x,y,z = xv
-    val = -2*(1 - x)*x*y*np.sin(2*np.pi*x)
+    val = 2*(1 - x)*x*y*np.sin(2*np.pi*x)*(-1 - ((1 - x)**2)*(x**2)*(y**4)*m_eta*(np.sin(2*np.pi*x)**2))
     return val
 
 class ModifiedBC(BoundaryConditionsSinglePhaseFlow):
@@ -62,21 +71,21 @@ class ModifiedBC(BoundaryConditionsSinglePhaseFlow):
         values[bc_idx] = np.array(list(map(p_exact, xc)))[bc_idx]
         return values
 
-    # def bc_values_darcy_flux(self, boundary_grid: pp.BoundaryGrid) -> pp.BoundaryCondition:
-    #     bounds = self.domain_boundary_sides(boundary_grid)
-    #     bc_idx = bounds.north
-    #     values = np.zeros(boundary_grid.num_cells)
-    #     xc = boundary_grid.cell_centers.T
-    #     values[bc_idx] = (boundary_grid.cell_volumes * np.array(list(map(qn_at_top_bc, xc))))[bc_idx]
-    #     return values
-
-    def bc_values_fluid_flux(self, boundary_grid: pp.BoundaryGrid) -> pp.BoundaryCondition:
+    def bc_values_darcy_flux(self, boundary_grid: pp.BoundaryGrid) -> pp.BoundaryCondition:
         bounds = self.domain_boundary_sides(boundary_grid)
         bc_idx = bounds.north
         values = np.zeros(boundary_grid.num_cells)
         xc = boundary_grid.cell_centers.T
         values[bc_idx] = (boundary_grid.cell_volumes * np.array(list(map(qn_at_top_bc, xc))))[bc_idx]
         return values
+
+    # def bc_values_fluid_flux(self, boundary_grid: pp.BoundaryGrid) -> pp.BoundaryCondition:
+    #     bounds = self.domain_boundary_sides(boundary_grid)
+    #     bc_idx = bounds.north
+    #     values = np.zeros(boundary_grid.num_cells)
+    #     xc = boundary_grid.cell_centers.T
+    #     values[bc_idx] = (boundary_grid.cell_volumes * np.array(list(map(qn_at_top_bc, xc))))[bc_idx]
+    #     return values
 
 
 class ModifiedSource:
@@ -85,7 +94,6 @@ class ModifiedSource:
         # Retrieve internal sources (jump in mortar fluxes) from the base class
         internal_sources: pp.ad.Operator = super().fluid_source(subdomains)
 
-        # Retrieve external (integrated) sources from the exact solution.
         values = []
 
         for sd in subdomains:
@@ -109,14 +117,24 @@ class SinglePhaseFlowGeometryBC(
     ModifiedBC,
     SinglePhaseFlow):
     """Adding both geometry and modified boundary conditions to the default model."""
-    ...
+
+    def fluid_density(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
+
+        rho_ref = pp.ad.Scalar(1.0, "reference_fluid_density")
+        eta = pp.ad.Scalar(global_eta, "nonlinear_scale")
+        dp = self.perturbation_from_reference("pressure", subdomains)
+        rho = rho_ref + eta * dp**2
+        rho.set_name("fluid_density")
+        return rho
+
+
 
 
 params = {}
 fluid_constants = pp.FluidConstants({"viscosity": 1.0, "density": 1.0})
 solid_constants = pp.SolidConstants({"permeability": 1.0, "porosity": 0.0})
 material_constants = {"fluid": fluid_constants, "solid": solid_constants}
-params = {"material_constants": material_constants}
+params = {"material_constants": material_constants, "max_iterations": 50}
 
 model = SinglePhaseFlowGeometryBC(params)
 pp.run_time_dependent_model(model, params)
@@ -124,10 +142,12 @@ model.exporter.write_vtu([model.pressure_variable])
 
 # Some remarks:
 # For this particular setting:
-# - The problem being approximated is linear in the scalar field (pressure);
+# - The problem being approximated is nonlinear in the scalar field (pressure);
 # - The Mass flux and Volumetric Darcy flux coincide;
 # - By employing the method bc_values_darcy_flux leads to the correct approximation;
 #   while employing the method bc_values_fluid_flux leads to an incorrect approximation.
+# - The parameter eta scale the nonlinear term in the density. Now for bc_values_darcy_flux
+#   The approximation is incorrect due to some artificial numerical diffusion.
 
 # Computing relative l2 error
 dimension = 2
