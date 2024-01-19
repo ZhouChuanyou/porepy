@@ -4,7 +4,6 @@ import numpy as np
 from porepy.models.fluid_mass_balance import SinglePhaseFlow
 from porepy.models.fluid_mass_balance import BoundaryConditionsSinglePhaseFlow
 from porepy.applications.md_grids.domains import nd_cube_domain
-# from porepy.constitutive_laws import FluidDensityFromPressure
 
 class ModifiedGeometry:
     def set_domain(self) -> None:
@@ -28,8 +27,8 @@ class SinglePhaseFlowGeometry(
     """Combining the modified geometry and the default model."""
     ...
 
-# Paremeter to control the nonlinearity in rho, eta in [0,45]
-global_eta = 45.0
+# Paremeter to control the non-linearity in rho, eta in [0,100]
+global_eta = 0.0
 
 # Manufacture solution data
 def p_exact(xv):
@@ -128,17 +127,34 @@ class SinglePhaseFlowGeometryBC(
         return rho
 
 
-
-
 params = {}
 fluid_constants = pp.FluidConstants({"viscosity": 1.0, "density": 1.0})
 solid_constants = pp.SolidConstants({"permeability": 1.0, "porosity": 0.0})
 material_constants = {"fluid": fluid_constants, "solid": solid_constants}
-params = {"material_constants": material_constants, "max_iterations": 50}
+params = {"material_constants": material_constants, "max_iterations": 2, "prepare_simulation": False, "nl_convergence_tol": 1.0e0}
 
 model = SinglePhaseFlowGeometryBC(params)
+
+# project exact solution and used as initial guess
+dimension = 2
+model.prepare_simulation()
+data = model.mdg.subdomains(True, 2)
+p_e = np.array(list(map(p_exact, data[0][0].cell_centers.T)))
+data[0][1]['time_step_solutions']['pressure'][0] = p_e
+data[0][1]['iterate_solutions']['pressure'][0] = p_e
+
+# perform assertion
+res = model.equation_system.assemble(evaluate_jacobian=False)
+print("Residual norm at projected solution: ", np.linalg.norm(res))
+satisfy_pde_q = np.linalg.norm(res) < 1.0e-3
+
+
 pp.run_time_dependent_model(model, params)
 model.exporter.write_vtu([model.pressure_variable])
+res = model.equation_system.assemble(evaluate_jacobian=False)
+print("Residual norm: ", np.linalg.norm(res))
+consistent_discretizaiton_q = satisfy_pde_q and  np.linalg.norm(res) < 1.0e-14
+print("Consistent discretization?", consistent_discretizaiton_q)
 
 # Some remarks:
 # For this particular setting:
@@ -146,11 +162,10 @@ model.exporter.write_vtu([model.pressure_variable])
 # - The Mass flux and Volumetric Darcy flux coincide;
 # - By employing the method bc_values_darcy_flux leads to the correct approximation;
 #   while employing the method bc_values_fluid_flux leads to an incorrect approximation.
-# - The parameter eta scale the nonlinear term in the density. Now for bc_values_darcy_flux
+# - The parameter eta scales the nonlinear term in the density. Now for bc_values_darcy_flux
 #   The approximation is incorrect due to some artificial numerical diffusion.
 
 # Computing relative l2 error
-dimension = 2
 data = model.mdg.subdomains(True, dimension)
 p_h = data[0][1]['time_step_solutions']['pressure'][0]
 p_e = np.array(list(map(p_exact, data[0][0].cell_centers.T)))
@@ -159,3 +174,6 @@ rel_error = (p_h - p_e) / sol_norm
 rel_l2_error = np.sqrt(np.sum(rel_error * rel_error * data[0][0].cell_volumes))
 print("Exact solution norm : ", sol_norm)
 print("Relative l2_error in pressure: ", rel_l2_error)
+
+
+
