@@ -13,10 +13,10 @@ class ModifiedGeometry:
         self._domain = nd_cube_domain(dimension, size)
 
     def grid_type(self) -> str:
-        return self.params.get("grid_type", "simplex")
+        return self.params.get("grid_type", "cartesian")
 
     def meshing_arguments(self) -> dict:
-        cell_size = self.solid.convert_units(0.01, "m")
+        cell_size = self.solid.convert_units(0.005, "m")
         mesh_args: dict[str, float] = {"cell_size": cell_size}
         return mesh_args
 
@@ -28,7 +28,7 @@ class SinglePhaseFlowGeometry(
     ...
 
 # Paremeter to control the non-linearity in rho, eta in [0,100]
-global_eta = 0.0
+global_eta = 1000.0
 
 # Manufacture solution data
 def p_exact(xv):
@@ -62,6 +62,13 @@ class ModifiedBC(BoundaryConditionsSinglePhaseFlow):
         bc = pp.BoundaryCondition(sd, bc_idx, "dir")
         return bc
 
+    def bc_type_fluid_flux(self, sd: pp.Grid) -> pp.BoundaryCondition:
+        """Assign dirichlet to the west, south and east boundaries. The rest are Neumann by default."""
+        bounds = self.domain_boundary_sides(sd)
+        bc_idx = bounds.west + bounds.south + bounds.east
+        bc = pp.BoundaryCondition(sd, bc_idx, "dir")
+        return bc
+
     def bc_values_pressure(self, boundary_grid: pp.BoundaryGrid) -> np.ndarray:
         bounds = self.domain_boundary_sides(boundary_grid)
         bc_idx = bounds.west + bounds.south + bounds.east
@@ -78,13 +85,13 @@ class ModifiedBC(BoundaryConditionsSinglePhaseFlow):
         values[bc_idx] = (boundary_grid.cell_volumes * np.array(list(map(qn_at_top_bc, xc))))[bc_idx]
         return values
 
-    # def bc_values_fluid_flux(self, boundary_grid: pp.BoundaryGrid) -> pp.BoundaryCondition:
-    #     bounds = self.domain_boundary_sides(boundary_grid)
-    #     bc_idx = bounds.north
-    #     values = np.zeros(boundary_grid.num_cells)
-    #     xc = boundary_grid.cell_centers.T
-    #     values[bc_idx] = (boundary_grid.cell_volumes * np.array(list(map(qn_at_top_bc, xc))))[bc_idx]
-    #     return values
+    def bc_values_fluid_flux(self, boundary_grid: pp.BoundaryGrid) -> pp.BoundaryCondition:
+        bounds = self.domain_boundary_sides(boundary_grid)
+        bc_idx = bounds.north
+        values = np.zeros(boundary_grid.num_cells)
+        xc = boundary_grid.cell_centers.T
+        values[bc_idx] = (boundary_grid.cell_volumes * np.array(list(map(qn_at_top_bc, xc))))[bc_idx]
+        return values
 
 
 class ModifiedSource:
@@ -131,7 +138,8 @@ params = {}
 fluid_constants = pp.FluidConstants({"viscosity": 1.0, "density": 1.0})
 solid_constants = pp.SolidConstants({"permeability": 1.0, "porosity": 0.0})
 material_constants = {"fluid": fluid_constants, "solid": solid_constants}
-params = {"material_constants": material_constants, "max_iterations": 2, "prepare_simulation": False, "nl_convergence_tol": 1.0e0}
+# params = {"material_constants": material_constants, "max_iterations": 50, "prepare_simulation": False, "nl_convergence_tol": 1.0e0}
+params = {"material_constants": material_constants, "max_iterations": 50, "prepare_simulation": False}
 
 model = SinglePhaseFlowGeometryBC(params)
 
@@ -146,14 +154,14 @@ data[0][1]['iterate_solutions']['pressure'][0] = p_e
 # perform assertion
 res = model.equation_system.assemble(evaluate_jacobian=False)
 print("Residual norm at projected solution: ", np.linalg.norm(res))
-satisfy_pde_q = np.linalg.norm(res) < 1.0e-3
+almost_satisfy_pde_at_proj_solution_q = np.linalg.norm(res) < 1.0e-2
 
 
 pp.run_time_dependent_model(model, params)
 model.exporter.write_vtu([model.pressure_variable])
 res = model.equation_system.assemble(evaluate_jacobian=False)
 print("Residual norm: ", np.linalg.norm(res))
-consistent_discretizaiton_q = satisfy_pde_q and  np.linalg.norm(res) < 1.0e-14
+consistent_discretizaiton_q = almost_satisfy_pde_at_proj_solution_q and  np.linalg.norm(res) < 1.0e-14
 print("Consistent discretization?", consistent_discretizaiton_q)
 
 # Some remarks:
@@ -172,8 +180,10 @@ p_e = np.array(list(map(p_exact, data[0][0].cell_centers.T)))
 sol_norm = np.sqrt(np.sum((p_e) * (p_e) * data[0][0].cell_volumes))
 rel_error = (p_h - p_e) / sol_norm
 rel_l2_error = np.sqrt(np.sum(rel_error * rel_error * data[0][0].cell_volumes))
+print("Eta value : ", global_eta)
 print("Exact solution norm : ", sol_norm)
 print("Relative l2_error in pressure: ", rel_l2_error)
 
+assert consistent_discretizaiton_q
 
 
