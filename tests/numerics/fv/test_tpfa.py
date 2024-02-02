@@ -822,11 +822,13 @@ class DiffTpfaMpfaEquivalentCartesianGrids(
         all_vals[0::tensor_dim] = 1
         all_vals[4::tensor_dim] = 1
         all_vals[8::tensor_dim] = 1
+        kappa = pp.wrap_as_dense_ad_array(all_vals, name="Spatial_permeability_component")
         e_xx = self.e_i(subdomains, i=0, dim=tensor_dim)
         e_yy = self.e_i(subdomains, i=4, dim=tensor_dim)
         e_zz = self.e_i(subdomains, i=8, dim=tensor_dim)
-
-        return (e_xx + e_yy + e_zz) @ (pp.ad.Scalar(1.0) + p**2)
+        cell_projection = pp.ad.SparseArray(sps.eye(nc, dtype=float, format='csr'))
+        nonlinear_weight =  pp.ad.Scalar(1.0) + p**2
+        return kappa * (e_xx + e_yy) @ cell_projection @ nonlinear_weight
 
 
     def bc_values_pressure(self, boundary_grid: pp.BoundaryGrid) -> np.ndarray:
