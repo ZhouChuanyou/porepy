@@ -822,12 +822,11 @@ class DiffTpfaMpfaEquivalentCartesianGrids(
         all_vals[0::tensor_dim] = 1
         all_vals[4::tensor_dim] = 1
         all_vals[8::tensor_dim] = 1
-
         e_xx = self.e_i(subdomains, i=0, dim=tensor_dim)
         e_yy = self.e_i(subdomains, i=4, dim=tensor_dim)
         p = self.pressure(subdomains)
 
-        return e_xx @ p**2 + e_yy @ p**2
+        return pp.wrap_as_dense_ad_array(all_vals, name="Spatial_permeability_component") * (e_xx + e_yy) @ (pp.Scalar(1.0) + p**2)
         return pp.wrap_as_dense_ad_array(
             all_vals, name="Constant_permeability_component"
         ) + e_xx @ p**2 + e_yy @ p**2
