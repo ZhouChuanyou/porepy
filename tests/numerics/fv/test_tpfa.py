@@ -134,6 +134,17 @@ class _SetFluxDiscretizations:
         else:
             return pp.ad.MpfaAd(self.fourier_keyword, subdomains)
 
+class RandomInitialCondition:
+    def initial_condition(self):
+        """Set a random initial condition, to avoid the trivial case of a constant
+        permeability tensor and trivial pressure and interface flux fields.
+        """
+        super().initial_condition()
+        num_dofs = self.equation_system.num_dofs()
+        np.random.seed(42)
+        values = np.random.rand(num_dofs)
+        self.equation_system.set_variable_values(values, iterate_index=0)
+
 
 class UnitTestAdTpfaFlux(
     pp.constitutive_laws.DarcysLawAd,
@@ -631,6 +642,7 @@ def test_transmissibility_calculation(vector_source: bool, base_discr: str):
 class DiffTpfaGridsOfAllDimensions(
     CubeDomainOrthogonalFractures,
     _SetFluxDiscretizations,
+    RandomInitialCondition,
     pp.constitutive_laws.CubicLawPermeability,
     pp.constitutive_laws.DarcysLawAd,
     pp.fluid_mass_balance.SinglePhaseFlow,
@@ -677,15 +689,6 @@ class DiffTpfaGridsOfAllDimensions(
             + e_yy @ self.pressure(subdomains) ** 2
         )
 
-    def initial_condition(self):
-        """Set a random initial condition, to avoid the trivial case of a constant
-        permeability tensor and trivial pressure and interface flux fields.
-        """
-        super().initial_condition()
-        num_dofs = self.equation_system.num_dofs()
-        values = np.random.rand(num_dofs)
-        self.equation_system.set_variable_values(values, iterate_index=0)
-
 
 @pytest.mark.parametrize("base_discr", ["tpfa", "mpfa"])
 @pytest.mark.parametrize("grid_type", ["cartesian", "simplex"])
@@ -730,21 +733,13 @@ def test_diff_tpfa_on_grid_with_all_dimensions(base_discr: str, grid_type: str):
 
 class WithoutDiffTpfa(
     _SetFluxDiscretizations,
+    RandomInitialCondition,
     pp.mass_and_energy_balance.MassAndEnergyBalance,
 ):
     """Helper class to test that the methods for differentiating diffusive fluxes and
     potential reconstructions work on grids of all dimensions.
     """
-
-    def initial_condition(self):
-        """Set a random initial condition, to avoid the trivial case of a constant
-        pressure.
-        """
-        super().initial_condition()
-        num_dofs = self.equation_system.num_dofs()
-        np.random.seed(42)
-        values = np.random.rand(num_dofs)
-        self.equation_system.set_variable_values(values, iterate_index=0)
+    pass
 
 
 class WithDiffTpfa(
@@ -805,6 +800,7 @@ class DiffTpfaFractureTipsInternalBoundaries(
     well_models.OneVerticalWell,
     well_models.BoundaryConditionsWellSetup,
     _SetFluxDiscretizations,
+    RandomInitialCondition,
     pp.constitutive_laws.DarcysLawAd,
     pp.constitutive_laws.FouriersLawAd,
     pp.mass_and_energy_balance.MassAndEnergyBalance,
@@ -834,16 +830,6 @@ class DiffTpfaFractureTipsInternalBoundaries(
             np.array([[0.3, 0.3, 0.3, 0.3], [0.2, 0.8, 0.8, 0.2], [0.2, 0.2, 0.8, 0.8]])
         )
         self._fractures.append(frac)
-
-    def initial_condition(self):
-        """Set a random initial condition, to avoid the trivial case of a constant
-        pressure hiding difficulties.
-        """
-        super().initial_condition()
-        num_dofs = self.equation_system.num_dofs()
-        np.random.seed(42)
-        values = np.random.rand(num_dofs)
-        self.equation_system.set_variable_values(values, iterate_index=0)
 
 
 @pytest.mark.parametrize("base_discr", ["tpfa", "mpfa"])
