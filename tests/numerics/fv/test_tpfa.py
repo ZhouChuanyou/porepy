@@ -824,12 +824,9 @@ class DiffTpfaMpfaEquivalentCartesianGrids(
         all_vals[8::tensor_dim] = 1
         e_xx = self.e_i(subdomains, i=0, dim=tensor_dim)
         e_yy = self.e_i(subdomains, i=4, dim=tensor_dim)
-        p = self.pressure(subdomains)
+        e_zz = self.e_i(subdomains, i=8, dim=tensor_dim)
 
-        return pp.wrap_as_dense_ad_array(all_vals, name="Spatial_permeability_component") * (e_xx + e_yy) @ (pp.Scalar(1.0) + p**2)
-        return pp.wrap_as_dense_ad_array(
-            all_vals, name="Constant_permeability_component"
-        ) + e_xx @ p**2 + e_yy @ p**2
+        return (e_xx + e_yy + e_zz) @ (pp.ad.Scalar(1.0) + p**2)
 
 
     def bc_values_pressure(self, boundary_grid: pp.BoundaryGrid) -> np.ndarray:
@@ -892,6 +889,7 @@ def test_diff_tpfa_and_mpfa_equivalent_cartesian_grids():
     assert np.allclose(tpfa_val, mpfa_val)
     assert np.allclose(tpfa_jac.A, mpfa_jac.A)
 
+test_diff_tpfa_and_mpfa_equivalent_cartesian_grids()
 
 
 class DiffTpfaFractureTipsInternalBoundaries(
