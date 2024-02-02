@@ -13,7 +13,7 @@ import porepy as pp
 
 from porepy.applications.test_utils import common_xpfa_tests as xpfa_tests
 from porepy.applications.md_grids.model_geometries import (
-    CubeDomainOrthogonalFractures,
+    CubeDomainOrthogonalFractures, SquareDomainOrthogonalFractures,
 )
 from porepy.applications.md_grids import model_geometries
 from porepy.applications.test_utils import well_models
@@ -793,6 +793,106 @@ def test_diff_tpfa_and_standard_tpfa_give_same_linear_system(base_discr: str):
 
     assert np.allclose(matrix[0].A, matrix[1].A)
     assert np.allclose(vector[0], vector[1])
+
+
+class DiffTpfaMpfaEquivalentCartesianGrids(
+    SquareDomainOrthogonalFractures,
+    _SetFluxDiscretizations,
+    RandomInitialCondition,
+    pp.constitutive_laws.DarcysLawAd,
+    pp.model_boundary_conditions.BoundaryConditionsMassDirNorthSouth,
+    pp.fluid_mass_balance.SinglePhaseFlow,
+):
+    def __init__(self, params):
+        # No fractures
+        params.update({"fracture_indices": []})
+        super().__init__(params)
+
+    def permeability(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
+        """Constant permeability tensor."""
+        if len(subdomains) == 0:
+            return pp.wrap_as_dense_ad_array(0, size=0)
+
+        nc = sum([sd.num_cells for sd in subdomains])
+        tensor_dim = 3**2
+
+        p = self.pressure(subdomains)
+
+        all_vals = np.zeros(nc * tensor_dim, dtype=float)
+        all_vals[0::tensor_dim] = 1
+        all_vals[4::tensor_dim] = 1
+        all_vals[8::tensor_dim] = 1
+
+        e_xx = self.e_i(subdomains, i=0, dim=tensor_dim)
+        e_yy = self.e_i(subdomains, i=4, dim=tensor_dim)
+        p = self.pressure(subdomains)
+
+        return e_xx @ p**2 + e_yy @ p**2
+        return pp.wrap_as_dense_ad_array(
+            all_vals, name="Constant_permeability_component"
+        ) + e_xx @ p**2 + e_yy @ p**2
+
+
+    def bc_values_pressure(self, boundary_grid: pp.BoundaryGrid) -> np.ndarray:
+        """Boundary condition values for Darcy flux.
+
+        Dirichlet boundary conditions are defined on the north and south boundaries,
+        with a constant value equal to the fluid's reference pressure (which will be 0
+        by default).
+
+        Parameters:
+            boundary_grid: Boundary grid for which to define boundary conditions.
+
+        Returns:
+            Boundary condition values array.
+
+        """
+        np.random.seed(42)
+        domain_sides = self.domain_boundary_sides(boundary_grid)
+        vals_loc = np.random.rand(boundary_grid.num_cells)
+        return vals_loc
+
+
+    def bc_values_darcy_flux(self, boundary_grid: pp.BoundaryGrid) -> np.ndarray:
+        """**Volumetric** Darcy flux values for the Neumann boundary condition.
+
+        These values are used on the boundaries where Neumann data for the
+        volumetric Darcy :math:`\\mathbf{K}\\nabla p` flux are required.
+
+        Parameters:
+            boundary_grid: Boundary grid to provide values for.
+
+        Returns:
+            An array with ``shape=(boundary_grid.num_cells,)`` containing the volumetric
+            Darcy flux values on the provided boundary grid.
+
+        """
+        np.random.seed(42)
+        value = np.random.rand(boundary_grid.num_cells)
+        return value
+
+
+
+def test_diff_tpfa_and_mpfa_equivalent_cartesian_grids():
+
+    model_tpfa = DiffTpfaMpfaEquivalentCartesianGrids({"base_discr": "tpfa"})
+    model_mpfa = DiffTpfaMpfaEquivalentCartesianGrids({"base_discr": "mpfa"})
+
+    model_tpfa.prepare_simulation()
+    model_mpfa.prepare_simulation()
+
+    darcy_flux_tpfa = model_tpfa.darcy_flux(model_tpfa.mdg.subdomains())
+    darcy_flux_mpfa = model_mpfa.darcy_flux(model_mpfa.mdg.subdomains())
+
+    tpfa_res = darcy_flux_tpfa.value_and_jacobian(model_tpfa.equation_system)
+    tpfa_val, tpfa_jac = tpfa_res.val, tpfa_res.jac
+
+    mpfa_res = darcy_flux_mpfa.value_and_jacobian(model_mpfa.equation_system)
+    mpfa_val, mpfa_jac = mpfa_res.val, mpfa_res.jac
+
+    assert np.allclose(tpfa_val, mpfa_val)
+    assert np.allclose(tpfa_jac.A, mpfa_jac.A)
+
 
 
 class DiffTpfaFractureTipsInternalBoundaries(
