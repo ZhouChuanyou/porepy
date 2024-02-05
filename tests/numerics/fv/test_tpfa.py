@@ -819,16 +819,25 @@ class DiffTpfaMpfaEquivalentCartesianGrids(
         p = self.pressure(subdomains)
 
         all_vals = np.zeros(nc * tensor_dim, dtype=float)
-        all_vals[0::tensor_dim] = 1
-        all_vals[4::tensor_dim] = 1
+        all_vals[0::tensor_dim] = 0.1
+        all_vals[4::tensor_dim] = 10
         all_vals[8::tensor_dim] = 1
-        kappa = pp.wrap_as_dense_ad_array(all_vals, name="Spatial_permeability_component")
+
         e_xx = self.e_i(subdomains, i=0, dim=tensor_dim)
         e_yy = self.e_i(subdomains, i=4, dim=tensor_dim)
         e_zz = self.e_i(subdomains, i=8, dim=tensor_dim)
-        cell_projection = pp.ad.SparseArray(sps.eye(nc, dtype=float, format='csr'))
-        nonlinear_weight =  pp.ad.Scalar(1.0) + p**2
-        return kappa * (e_xx + e_yy) @ cell_projection @ nonlinear_weight
+
+        # Spatial dependent component
+        kappa = pp.wrap_as_dense_ad_array(all_vals, name="Spatial_permeability_component")
+
+        # State dependent component
+        nonlinear_weight = pp.ad.Scalar(1.0) + p**2
+
+        # Nonlinear diffusive tensor
+        nonlinear_tensor = kappa * ((e_xx + e_yy + e_zz) @ nonlinear_weight)
+        nonlinear_tensor.set_name("Nonlinear_diffusive_tensor")
+
+        return nonlinear_tensor
 
 
     def bc_values_pressure(self, boundary_grid: pp.BoundaryGrid) -> np.ndarray:
@@ -891,7 +900,7 @@ def test_diff_tpfa_and_mpfa_equivalent_cartesian_grids():
     assert np.allclose(tpfa_val, mpfa_val)
     assert np.allclose(tpfa_jac.A, mpfa_jac.A)
 
-test_diff_tpfa_and_mpfa_equivalent_cartesian_grids()
+# test_diff_tpfa_and_mpfa_equivalent_cartesian_grids()
 
 
 class DiffTpfaFractureTipsInternalBoundaries(
