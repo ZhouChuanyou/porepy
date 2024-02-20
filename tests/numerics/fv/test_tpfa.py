@@ -13,7 +13,7 @@ import porepy as pp
 
 from porepy.applications.test_utils import common_xpfa_tests as xpfa_tests
 from porepy.applications.md_grids.model_geometries import (
-    CubeDomainOrthogonalFractures,
+    CubeDomainOrthogonalFractures, SquareDomainOrthogonalFractures,
 )
 from porepy.applications.md_grids import model_geometries
 from porepy.applications.test_utils import well_models
@@ -133,6 +133,17 @@ class _SetFluxDiscretizations:
             return pp.ad.TpfaAd(self.fourier_keyword, subdomains)
         else:
             return pp.ad.MpfaAd(self.fourier_keyword, subdomains)
+
+class RandomInitialCondition:
+    def initial_condition(self):
+        """Set a random initial condition, to avoid the trivial case of a constant
+        permeability tensor and trivial pressure and interface flux fields.
+        """
+        super().initial_condition()
+        num_dofs = self.equation_system.num_dofs()
+        np.random.seed(42)
+        values = np.random.rand(num_dofs)
+        self.equation_system.set_variable_values(values, iterate_index=0)
 
 
 class UnitTestAdTpfaFlux(
@@ -631,6 +642,7 @@ def test_transmissibility_calculation(vector_source: bool, base_discr: str):
 class DiffTpfaGridsOfAllDimensions(
     CubeDomainOrthogonalFractures,
     _SetFluxDiscretizations,
+    RandomInitialCondition,
     pp.constitutive_laws.CubicLawPermeability,
     pp.constitutive_laws.DarcysLawAd,
     pp.fluid_mass_balance.SinglePhaseFlow,
@@ -677,15 +689,6 @@ class DiffTpfaGridsOfAllDimensions(
             + e_yy @ self.pressure(subdomains) ** 2
         )
 
-    def initial_condition(self):
-        """Set a random initial condition, to avoid the trivial case of a constant
-        permeability tensor and trivial pressure and interface flux fields.
-        """
-        super().initial_condition()
-        num_dofs = self.equation_system.num_dofs()
-        values = np.random.rand(num_dofs)
-        self.equation_system.set_variable_values(values, iterate_index=0)
-
 
 @pytest.mark.parametrize("base_discr", ["tpfa", "mpfa"])
 @pytest.mark.parametrize("grid_type", ["cartesian", "simplex"])
@@ -730,21 +733,13 @@ def test_diff_tpfa_on_grid_with_all_dimensions(base_discr: str, grid_type: str):
 
 class WithoutDiffTpfa(
     _SetFluxDiscretizations,
+    RandomInitialCondition,
     pp.mass_and_energy_balance.MassAndEnergyBalance,
 ):
     """Helper class to test that the methods for differentiating diffusive fluxes and
     potential reconstructions work on grids of all dimensions.
     """
-
-    def initial_condition(self):
-        """Set a random initial condition, to avoid the trivial case of a constant
-        pressure.
-        """
-        super().initial_condition()
-        num_dofs = self.equation_system.num_dofs()
-        np.random.seed(42)
-        values = np.random.rand(num_dofs)
-        self.equation_system.set_variable_values(values, iterate_index=0)
+    pass
 
 
 class WithDiffTpfa(
@@ -800,11 +795,120 @@ def test_diff_tpfa_and_standard_tpfa_give_same_linear_system(base_discr: str):
     assert np.allclose(vector[0], vector[1])
 
 
+class DiffTpfaMpfaEquivalentCartesianGrids(
+    SquareDomainOrthogonalFractures,
+    _SetFluxDiscretizations,
+    RandomInitialCondition,
+    pp.constitutive_laws.DarcysLawAd,
+    pp.model_boundary_conditions.BoundaryConditionsMassDirNorthSouth,
+    pp.fluid_mass_balance.SinglePhaseFlow,
+):
+    def __init__(self, params):
+        # No fractures
+        params.update({"fracture_indices": []})
+        super().__init__(params)
+
+    def permeability(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
+        """Constant permeability tensor."""
+        if len(subdomains) == 0:
+            return pp.wrap_as_dense_ad_array(0, size=0)
+
+        nc = sum([sd.num_cells for sd in subdomains])
+        tensor_dim = 3**2
+
+        p = self.pressure(subdomains)
+
+        all_vals = np.zeros(nc * tensor_dim, dtype=float)
+        all_vals[0::tensor_dim] = 0.1
+        all_vals[4::tensor_dim] = 10
+        all_vals[8::tensor_dim] = 1
+
+        e_xx = self.e_i(subdomains, i=0, dim=tensor_dim)
+        e_yy = self.e_i(subdomains, i=4, dim=tensor_dim)
+        e_zz = self.e_i(subdomains, i=8, dim=tensor_dim)
+
+        # Spatial dependent component
+        kappa = pp.wrap_as_dense_ad_array(all_vals, name="Spatial_permeability_component")
+
+        # State dependent component
+        nonlinear_weight = pp.ad.Scalar(1.0) + p**2
+
+        # Nonlinear diffusive tensor
+        nonlinear_tensor = kappa * ((e_xx + e_yy + e_zz) @ nonlinear_weight)
+        nonlinear_tensor.set_name("Nonlinear_diffusive_tensor")
+
+        return nonlinear_tensor
+
+
+    def bc_values_pressure(self, boundary_grid: pp.BoundaryGrid) -> np.ndarray:
+        """Boundary condition values for Darcy flux.
+
+        Dirichlet boundary conditions are defined on the north and south boundaries,
+        with a constant value equal to the fluid's reference pressure (which will be 0
+        by default).
+
+        Parameters:
+            boundary_grid: Boundary grid for which to define boundary conditions.
+
+        Returns:
+            Boundary condition values array.
+
+        """
+        np.random.seed(42)
+        domain_sides = self.domain_boundary_sides(boundary_grid)
+        vals_loc = np.random.rand(boundary_grid.num_cells)
+        return vals_loc
+
+
+    def bc_values_darcy_flux(self, boundary_grid: pp.BoundaryGrid) -> np.ndarray:
+        """**Volumetric** Darcy flux values for the Neumann boundary condition.
+
+        These values are used on the boundaries where Neumann data for the
+        volumetric Darcy :math:`\\mathbf{K}\\nabla p` flux are required.
+
+        Parameters:
+            boundary_grid: Boundary grid to provide values for.
+
+        Returns:
+            An array with ``shape=(boundary_grid.num_cells,)`` containing the volumetric
+            Darcy flux values on the provided boundary grid.
+
+        """
+        np.random.seed(42)
+        value = np.random.rand(boundary_grid.num_cells)
+        return value
+
+
+
+def test_diff_tpfa_and_mpfa_equivalent_cartesian_grids():
+
+    model_tpfa = DiffTpfaMpfaEquivalentCartesianGrids({"base_discr": "tpfa"})
+    model_mpfa = DiffTpfaMpfaEquivalentCartesianGrids({"base_discr": "mpfa"})
+
+    model_tpfa.prepare_simulation()
+    model_mpfa.prepare_simulation()
+
+    darcy_flux_tpfa = model_tpfa.darcy_flux(model_tpfa.mdg.subdomains())
+    darcy_flux_mpfa = model_mpfa.darcy_flux(model_mpfa.mdg.subdomains())
+
+    tpfa_res = darcy_flux_tpfa.value_and_jacobian(model_tpfa.equation_system)
+    tpfa_val, tpfa_jac = tpfa_res.val, tpfa_res.jac
+
+    mpfa_res = darcy_flux_mpfa.value_and_jacobian(model_mpfa.equation_system)
+    mpfa_val, mpfa_jac = mpfa_res.val, mpfa_res.jac
+
+    assert np.allclose(tpfa_val, mpfa_val)
+    assert np.allclose(tpfa_jac.A, mpfa_jac.A)
+
+# test_diff_tpfa_and_mpfa_equivalent_cartesian_grids()
+
+
 class DiffTpfaFractureTipsInternalBoundaries(
     model_geometries.OrthogonalFractures3d,
     well_models.OneVerticalWell,
     well_models.BoundaryConditionsWellSetup,
     _SetFluxDiscretizations,
+    RandomInitialCondition,
     pp.constitutive_laws.DarcysLawAd,
     pp.constitutive_laws.FouriersLawAd,
     pp.mass_and_energy_balance.MassAndEnergyBalance,
@@ -834,16 +938,6 @@ class DiffTpfaFractureTipsInternalBoundaries(
             np.array([[0.3, 0.3, 0.3, 0.3], [0.2, 0.8, 0.8, 0.2], [0.2, 0.2, 0.8, 0.8]])
         )
         self._fractures.append(frac)
-
-    def initial_condition(self):
-        """Set a random initial condition, to avoid the trivial case of a constant
-        pressure hiding difficulties.
-        """
-        super().initial_condition()
-        num_dofs = self.equation_system.num_dofs()
-        np.random.seed(42)
-        values = np.random.rand(num_dofs)
-        self.equation_system.set_variable_values(values, iterate_index=0)
 
 
 @pytest.mark.parametrize("base_discr", ["tpfa", "mpfa"])
