@@ -795,6 +795,108 @@ def test_diff_tpfa_and_standard_tpfa_give_same_linear_system(base_discr: str):
     assert np.allclose(vector[0], vector[1])
 
 
+class WithoutDiffXpfa(
+    _SetFluxDiscretizations,
+    RandomInitialCondition,
+    pp.fluid_mass_balance.SinglePhaseFlow,
+):
+    """Helper class to test that the methods for differentiating diffusive fluxes and
+    potential reconstructions work on grids of all dimensions.
+    """
+    pass
+
+    def permeability(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
+        """Constant permeability tensor."""
+        if len(subdomains) == 0:
+            return pp.wrap_as_dense_ad_array(0, size=0)
+
+        nc = sum([sd.num_cells for sd in subdomains])
+        tensor_dim = 3**2
+
+        p = self.pressure(subdomains)
+
+        all_vals = np.zeros(nc * tensor_dim, dtype=float)
+        all_vals[0::tensor_dim] = 0.1
+        all_vals[4::tensor_dim] = 10.0
+        all_vals[8::tensor_dim] = 1
+
+        e_xx = self.e_i(subdomains, i=0, dim=tensor_dim)
+        e_yy = self.e_i(subdomains, i=4, dim=tensor_dim)
+        e_zz = self.e_i(subdomains, i=8, dim=tensor_dim)
+
+        # Spatial dependent component
+        kappa = pp.wrap_as_dense_ad_array(all_vals, name="Spatial_permeability_component")
+
+        # State dependent component
+        nonlinear_weight = pp.ad.Scalar(1.0) + p**2
+
+        # Nonlinear diffusive tensor
+        nonlinear_tensor = kappa * ((e_xx + e_yy + e_zz) @ nonlinear_weight)
+        nonlinear_tensor.set_name("Nonlinear_diffusive_tensor")
+        return nonlinear_tensor
+
+
+class WithDiffXpfa(
+    pp.constitutive_laws.DarcysLawAd,
+    WithoutDiffXpfa,
+):
+    """Helper class to test that the methods for differentiating diffusive fluxes and
+    potential reconstructions work on grids of all dimensions.
+
+    We use the default thermal conductivity, which should be constant (in fact same as
+    permeability as defined below).
+    """
+
+    def permeability(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
+        """State dependent permeability tensor."""
+        if len(subdomains) == 0:
+            return pp.wrap_as_dense_ad_array(0, size=0)
+
+        nc = sum([sd.num_cells for sd in subdomains])
+        tensor_dim = 3**2
+
+        p = self.pressure(subdomains)
+
+        all_vals = np.zeros(nc * tensor_dim, dtype=float)
+        all_vals[0::tensor_dim] = 0.1
+        all_vals[4::tensor_dim] = 10.0
+        all_vals[8::tensor_dim] = 1
+
+        e_xx = self.e_i(subdomains, i=0, dim=tensor_dim)
+        e_yy = self.e_i(subdomains, i=4, dim=tensor_dim)
+        e_zz = self.e_i(subdomains, i=8, dim=tensor_dim)
+
+        # Spatial dependent component
+        kappa = pp.wrap_as_dense_ad_array(all_vals, name="Spatial_permeability_component")
+
+        # State dependent component
+        nonlinear_weight = pp.ad.Scalar(1.0) + p**2
+
+        # Nonlinear diffusive tensor
+        nonlinear_tensor = kappa * ((e_xx + e_yy + e_zz) @ nonlinear_weight)
+        nonlinear_tensor.set_name("Nonlinear_diffusive_tensor")
+        return nonlinear_tensor
+
+@pytest.mark.parametrize("grid_type", ["cartesian", "simplex"])
+@pytest.mark.parametrize("base_discr", ["tpfa", "mpfa"])
+def test_diff_xpfa_and_standard_xpfa_give_same_residuals(base_discr: str, grid_type: str):
+    """For X = {T,M}, discretize the same problem with a standard XPFA discretization
+    and a differentiable XPFA discretization, where the latter also has a constant
+    permeability, but given on 'differentiable form'. The the residual vectors should
+    be the same.
+    """
+    model_without_diff = WithoutDiffXpfa({"base_discr": base_discr, "grid_type": grid_type})
+    model_with_diff = WithDiffXpfa({"base_discr": base_discr, "grid_type": grid_type})
+
+    matrix, vector = [], []
+
+    for mod in [model_without_diff, model_with_diff]:
+        mod.prepare_simulation()
+        mod.assemble_linear_system()
+        vector.append(mod.linear_system[1])
+
+    assert np.allclose(vector[0], vector[1])
+
 class DiffTpfaMpfaEquivalentCartesianGrids(
     SquareDomainOrthogonalFractures,
     _SetFluxDiscretizations,
@@ -809,7 +911,7 @@ class DiffTpfaMpfaEquivalentCartesianGrids(
         super().__init__(params)
 
     def permeability(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
-        """Constant permeability tensor."""
+        """State dependent permeability tensor."""
         if len(subdomains) == 0:
             return pp.wrap_as_dense_ad_array(0, size=0)
 
