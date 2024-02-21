@@ -370,6 +370,309 @@ class MassBalanceEquations(pp.BalanceEquation):
         )
         return source
 
+class DiffusiveFlowBalanceEquations(pp.BalanceEquation):
+    """Mixed-dimensional diffusive flow balance equation.
+
+    Balance equation for all subdomains and diffusive flux relation on all interfaces
+    of codimension one and Peaceman flux relation on interfaces of codimension two
+    (well-fracture intersections).
+
+    """
+
+    mdg: pp.MixedDimensionalGrid
+    """Mixed dimensional grid for the current model. Normally defined in a mixin
+    instance of :class:`~porepy.models.geometry.ModelGeometry`.
+
+    """
+    interface_darcy_flux: Callable[
+        [list[pp.MortarGrid]], pp.ad.MixedDimensionalVariable
+    ]
+    """Darcy flux variable on interfaces. Normally defined in a mixin instance of
+    :class:`~porepy.models.fluid_mass_balance.VariablesSinglePhaseFlow`.
+
+    """
+    equation_system: pp.ad.EquationSystem
+    """EquationSystem object for the current model. Normally defined in a mixin class
+    defining the solution strategy.
+
+    """
+    fluid_density: Callable[[pp.SubdomainsOrBoundaries], pp.ad.Operator]
+    """Fluid density. Defined in a mixin class with a suitable constitutive relation.
+    """
+    porosity: Callable[[pp.SubdomainsOrBoundaries], pp.ad.Operator]
+    """Porosity of the rock. Normally provided by a mixin instance of
+    :class:`~porepy.models.constitutive_laws.ConstantPorosity` or a subclass thereof.
+
+    """
+    mobility: Callable[[pp.SubdomainsOrBoundaries], pp.ad.Operator]
+    """Fluid mobility. Normally provided by a mixin instance of
+    :class:`~porepy.models.constitutive_laws.FluidMobility`.
+
+    """
+    interface_darcy_flux_equation: Callable[[list[pp.MortarGrid]], pp.ad.Operator]
+    """Interface Darcy flux equation. Normally provided by a mixin instance of
+    :class:`~porepy.models.constitutive_laws.DarcysLaw`.
+
+    """
+    subdomains_to_interfaces: Callable[[list[pp.Grid], list[int]], list[pp.MortarGrid]]
+    """Map from subdomains to the adjacent interfaces. Normally defined in a mixin
+    instance of :class:`~porepy.models.geometry.ModelGeometry`.
+
+    """
+    interfaces_to_subdomains: Callable[[list[pp.MortarGrid]], list[pp.Grid]]
+    """Map from interfaces to the adjacent subdomains. Normally defined in a mixin
+    instance of :class:`~porepy.models.geometry.ModelGeometry`.
+
+    """
+    well_flux_equation: Callable[[list[pp.MortarGrid]], pp.ad.Operator]
+    """Well flux equation. Provided e.g. by a mixin instance of
+    :class:`~porepy.models.constitutive_laws.PiecmannWellFlux`.
+
+    """
+    create_boundary_operator: Callable[
+        [str, Sequence[pp.BoundaryGrid]], pp.ad.TimeDependentDenseArray
+    ]
+
+    bc_data_fluid_flux_key: str
+
+    bc_type_fluid_flux: Callable[[pp.Grid], pp.BoundaryCondition]
+
+    _combine_boundary_operators: Callable[
+        [
+            Sequence[pp.Grid],
+            Callable[[Sequence[pp.BoundaryGrid]], pp.ad.Operator],
+            Callable[[Sequence[pp.BoundaryGrid]], pp.ad.Operator],
+            Callable[[pp.Grid], pp.BoundaryCondition],
+            str,
+            int,
+        ],
+        pp.ad.Operator,
+    ]
+
+    def set_equations(self):
+        """Set the equations for the mass balance problem.
+
+        A mass balance equation is set for all subdomains and a Darcy-type flux relation
+        is set for all interfaces of codimension one.
+
+        """
+        subdomains = self.mdg.subdomains()
+        codim_1_interfaces = self.mdg.interfaces(codim=1)
+        # TODO: If wells are integrated for nd=2 models, consider refactoring sorting of
+        # interfaces into method returning either "normal" or well interfaces.
+        codim_2_interfaces = self.mdg.interfaces(codim=2)
+        sd_eq = self.mass_balance_equation(subdomains)
+        intf_eq = self.interface_darcy_flux_equation(codim_1_interfaces)
+        well_eq = self.well_flux_equation(codim_2_interfaces)
+        self.equation_system.set_equation(sd_eq, subdomains, {"cells": 1})
+        self.equation_system.set_equation(intf_eq, codim_1_interfaces, {"cells": 1})
+        self.equation_system.set_equation(well_eq, codim_2_interfaces, {"cells": 1})
+
+    def mass_balance_equation(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
+        """Mass balance equation for subdomains.
+
+        Parameters:
+            subdomains: List of subdomains.
+
+        Returns:
+            Operator representing the mass balance equation.
+
+        """
+        # Assemble the terms of the mass balance equation.
+        accumulation = self.fluid_mass(subdomains)
+        flux = self.fluid_flux(subdomains)
+        source = self.fluid_source(subdomains)
+
+        # Feed the terms to the general balance equation method.
+        eq = self.balance_equation(subdomains, accumulation, flux, source, dim=1)
+        eq.set_name("mass_balance_equation")
+        return eq
+
+    def fluid_mass(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
+        """The full measure of cell-wise fluid mass.
+
+        The product of fluid density and porosity is assumed constant cell-wise, and
+        integrated over the cell volume.
+
+        Note:
+            This implementation assumes constant porosity and must be overridden for
+            variable porosity. This has to do with wrapping of scalars as vectors or
+            matrices and will hopefully be improved in the future. Extension to variable
+            density is straightforward.
+
+        Parameters:
+            subdomains: List of subdomains.
+
+        Returns:
+            Operator representing the cell-wise fluid mass.
+
+        """
+        mass_density = self.fluid_density(subdomains) * self.porosity(subdomains)
+        mass = self.volume_integral(mass_density, subdomains, dim=1)
+        mass.set_name("fluid_mass")
+        return mass
+
+    def mobility_rho(self, domains: pp.SubdomainsOrBoundaries) -> pp.ad.Operator:
+        """Fluid density times mobility.
+
+        Parameters:
+            domains: List of grids to define the operator on.
+                Returns a variable-independent representation of boundary conditions if
+                called using a list of boundary grids.
+
+        Returns:
+            Operator representing the fluid density times mobility.
+
+        """
+        return self.fluid_density(domains) * self.mobility(domains)
+
+    def fluid_flux(self, domains: pp.SubdomainsOrBoundaries) -> pp.ad.Operator:
+        """Fluid flux as Darcy flux times density and mobility.
+
+        Note:
+            The advected entity in the fluid flux is given by :meth:`mobility_rho`.
+            When using upwinding, Dirichlet-type data for pressure and temperature
+            must also be provided on the Neumann-boundary when there is
+            an in-flux into the domain.
+            The advected entity must provide values on the boundary in this case, since
+            the upstream value of it is on the boundary.
+
+        Parameters:
+            domains: List of subdomains or boundary grids.
+
+        Raises:
+            ValueError: If the domains are not all grids or all boundary grids.
+
+        Returns:
+            Operator representing the fluid flux.
+
+        """
+        if len(domains) == 0 or all(isinstance(d, pp.BoundaryGrid) for d in domains):
+            # Note: in case of the empty subdomain list, the time dependent array is
+            # still returned. Otherwise, this method produces an infinite recursion
+            # loop. It does not affect real computations anyhow.
+            return self.create_boundary_operator(  # type: ignore[call-arg]
+                name=self.bc_data_fluid_flux_key, domains=domains
+            )
+
+        # Verify that the domains are subdomains.
+        if not all(isinstance(d, pp.Grid) for d in domains):
+            raise ValueError("domains must consist entirely of subdomains.")
+        # Now we can cast the domains
+        domains = cast(list[pp.Grid], domains)
+
+        discr = self.mobility_discretization(domains)
+        mob_rho = self.mobility_rho(domains)
+
+        # )
+        boundary_operator = self._combine_boundary_operators(  # type: ignore[call-arg]
+            subdomains=domains,
+            dirichlet_operator=self.mobility_rho,
+            neumann_operator=self.fluid_flux,
+            bc_type=self.bc_type_fluid_flux,
+            name="bc_values_fluid_flux",
+        )
+        flux = self.darcy_flux(
+            domains
+        )
+        flux.set_name("fluid_flux")
+        return flux
+
+    def interface_flux_equation(
+        self, interfaces: list[pp.MortarGrid]
+    ) -> pp.ad.Operator:
+        """Interface flux equation.
+
+        Parameters:
+            interfaces: List of interface grids.
+
+        Returns:
+            Operator representing the interface flux equation.
+
+        """
+        return self.interface_darcy_flux_equation(interfaces)
+
+    def interface_fluid_flux(self, interfaces: list[pp.MortarGrid]) -> pp.ad.Operator:
+        """Interface fluid flux.
+
+        Parameters:
+            interfaces: List of interface grids.
+
+        Returns:
+            Operator representing the interface fluid flux.
+
+        """
+        subdomains = self.interfaces_to_subdomains(interfaces)
+        discr = self.interface_mobility_discretization(interfaces)
+        mob_rho = self.mobility(subdomains) * self.fluid_density(subdomains)
+        # Call to constitutive law for advective fluxes.
+        flux: pp.ad.Operator = self.interface_advective_flux(interfaces, mob_rho, discr)
+        flux.set_name("interface_fluid_flux")
+        return flux
+
+    def well_fluid_flux(self, interfaces: list[pp.MortarGrid]) -> pp.ad.Operator:
+        """Interface fluid flux.
+
+        Parameters:
+            interfaces: List of interface grids.
+
+        Returns:
+            Operator representing the interface fluid flux.
+
+        """
+        subdomains = self.interfaces_to_subdomains(interfaces)
+        discr = self.interface_mobility_discretization(interfaces)
+        mob_rho = self.mobility(subdomains) * self.fluid_density(subdomains)
+        # Call to constitutive law for advective fluxes.
+        flux: pp.ad.Operator = self.well_advective_flux(interfaces, mob_rho, discr)
+        flux.set_name("well_fluid_flux")
+        return flux
+
+    def fluid_source(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
+        """Fluid source term.
+
+        Includes
+
+            - external sources
+            - interface flow from neighboring subdomains of higher dimension.
+            - well flow from neighboring subdomains of lower and higher dimension.
+
+        .. note::
+            When overriding this method to assign internal fluid sources, one is advised
+            to call the base class method and add the new contribution, thus ensuring
+            that the source term includes the contribution from the interface fluxes.
+
+        Parameters:
+            subdomains: List of subdomains.
+
+        Returns:
+            Operator representing the source term.
+
+        """
+        # Interdimensional fluxes manifest as source terms in lower-dimensional
+        # subdomains.
+        interfaces = self.subdomains_to_interfaces(subdomains, [1])
+        well_interfaces = self.subdomains_to_interfaces(subdomains, [2])
+        well_subdomains = self.interfaces_to_subdomains(well_interfaces)
+        projection = pp.ad.MortarProjections(self.mdg, subdomains, interfaces)
+        well_projection = pp.ad.MortarProjections(
+            self.mdg, well_subdomains, well_interfaces
+        )
+        subdomain_projection = pp.ad.SubdomainProjections(self.mdg.subdomains())
+        source = projection.mortar_to_secondary_int @ self.interface_fluid_flux(
+            interfaces
+        )
+        source.set_name("interface_fluid_flux_source")
+        well_fluxes = well_projection.mortar_to_secondary_int @ self.well_fluid_flux(
+            well_interfaces
+        ) - well_projection.mortar_to_primary_int @ self.well_fluid_flux(
+            well_interfaces
+        )
+        well_fluxes.set_name("well_fluid_flux_source")
+        source += subdomain_projection.cell_restriction(subdomains) @ (
+            subdomain_projection.cell_prolongation(well_subdomains) @ well_fluxes
+        )
+        return source
 
 class ConstitutiveLawsSinglePhaseFlow(
     pp.constitutive_laws.ZeroGravityForce,
@@ -899,7 +1202,7 @@ class SolutionStrategySinglePhaseFlow(pp.SolutionStrategy):
 # For this reason, we ignore the error here, and rely on the tests to catch any
 # inconsistencies.
 class SinglePhaseFlow(  # type: ignore[misc]
-    MassBalanceEquations,
+    DiffusiveFlowBalanceEquations,
     VariablesSinglePhaseFlow,
     ConstitutiveLawsSinglePhaseFlow,
     BoundaryConditionsSinglePhaseFlow,
