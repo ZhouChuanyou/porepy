@@ -1065,16 +1065,14 @@ def sparse_array_to_row_col_data(
 
 
 def invert_permutation(perm):
-    """
-    Invert permutation array
+    """Invert permutation array.
 
-    Parameters
-    ----------
-    perm : permutation array
+    Parameters:
+        perm : permutation array
 
-    Returns
-    -------
-    inv_perm: Permuted sparse array
+    Returns:
+        inv_perm: Permuted sparse array
+
     """
 
     x = np.empty_like(perm)
@@ -1085,19 +1083,17 @@ def invert_permutation(perm):
 def sparse_permute(
     a: sps.spmatrix, row_perm: np.ndarray, col_perm: np.ndarray, inplace_q: bool = False
 ) -> sps.spmatrix:
-    """
-    Permute a sparse array.
+    """Permute a sparse array.
 
-    Parameters
-    ----------
-    a : Sparse array
-    row_perm : Rows permutation dense array
-    col_perm : Columns permutation dense array
-    inplace_q: Apply permutation in place
+    Parameters:
+        a : Sparse array
+        row_perm : Rows permutation dense array
+        col_perm : Columns permutation dense array
+        inplace_q: Apply permutation in place
 
-    Returns
-    -------
-    a_perm: Permuted sparse array
+    Returns:
+        a_perm: Permuted sparse array
+
     """
 
     # This function only supports CSR anc CSC format.
@@ -1116,21 +1112,23 @@ def sparse_permute(
             "Column Permutation should have length equal to the number of columns."
         )
 
-    row_perm = invert_permutation(row_perm)
-    col_perm = invert_permutation(col_perm)
+    # Operating with unsigned int
+    # https://numpy.org/doc/stable/reference/arrays.scalars.html#numpy.uintc
+    row_perm = invert_permutation(row_perm).astype(dtype=np.uintc)
+    col_perm = invert_permutation(col_perm).astype(dtype=np.uintc)
 
-    o_indptr = a.indptr.astype(dtype=np.int32)
-    o_indices = a.indices.astype(dtype=np.int32)
+    o_indptr = a.indptr.astype(dtype=np.uintc)
+    o_indices = a.indices.astype(dtype=np.uintc)
 
     # Retrieve global indices (low complexity)
     if sps.isspmatrix_csr(a):
         row_reps = o_indptr[1 : o_indptr.size] - o_indptr[0 : o_indptr.size - 1]
-        rows = np.repeat(np.arange(a.shape[0], dtype=np.int32), row_reps)
+        rows = np.repeat(np.arange(a.shape[0], dtype=np.uintc), row_reps)
         cols = o_indices
 
         rows = row_perm[rows]
         cols = col_perm[cols]
-        sorted_idx = np.argsort(rows)
+        sorted_idx = np.argsort(rows).astype(dtype=np.uintc)
 
         count = np.bincount(rows)
         indptr = np.cumsum(np.insert(count, 0, 0)).astype(dtype=np.int32)
@@ -1139,18 +1137,19 @@ def sparse_permute(
 
     else:
         col_reps = o_indptr[1 : o_indptr.size] - o_indptr[0 : o_indptr.size - 1]
-        cols = np.repeat(np.arange(a.shape[1], dtype=np.int32), col_reps)
+        cols = np.repeat(np.arange(a.shape[1], dtype=np.uintc), col_reps)
         rows = a.indices
 
         rows = row_perm[rows]
         cols = col_perm[cols]
-        sorted_idx = np.argsort(cols)
+        sorted_idx = np.argsort(cols).astype(dtype=np.uintc)
 
         count = np.bincount(cols)
         indptr = np.cumsum(np.insert(count, 0, 0)).astype(dtype=np.int32)
         indices = rows[sorted_idx].astype(dtype=np.int32)
         data = a.data[sorted_idx]
 
+    # Applies inplace directive
     if inplace_q:
         a.indptr = indptr
         a.indices = indices
