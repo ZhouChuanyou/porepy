@@ -429,6 +429,7 @@ class MomentumBalanceEquations(pp.BalanceEquation):
         maxbp_abs = scalar_to_tangential @ f_max(b_p, norm_tangential_sum)
         characteristic: pp.ad.Operator = scalar_to_tangential @ f_characteristic(b_p)
         characteristic.set_name("characteristic_function_of_b_p")
+        self._characteristic = characteristic
 
         # Compose the equation itself. The last term handles the case bound=0, in which
         # case t_t = 0 cannot be deduced from the standard version of the complementary

@@ -146,7 +146,9 @@ class NewtonSolver:
                     )
                     newton_step()
                     solver_progressbar.update(n=1)
-                    solver_progressbar.set_postfix_str(f"Error {error_norm}")
+                    solver_progressbar.set_postfix_str(
+                        f"Error {error_norm:.1e}, dt {model.time_manager.dt:.1e}"
+                    )
 
                     if is_diverged:
                         # If the process finishes early, the tqdm bar needs to be
@@ -155,6 +157,7 @@ class NewtonSolver:
                         model.after_nonlinear_failure(sol, errors, iteration_counter)
                         break
                     elif is_converged:
+                        solver_progressbar.update(n=1)
                         solver_progressbar.close()
                         model.after_nonlinear_convergence(
                             sol, errors, iteration_counter
