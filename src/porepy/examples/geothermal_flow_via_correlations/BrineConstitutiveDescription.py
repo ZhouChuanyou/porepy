@@ -336,7 +336,7 @@ class SecondaryEquations(SecondaryEquationsMixin):
         par_points = np.array((z_NaCl, h, p)).T
         self.obl.sample_at(par_points)
 
-        # Gas saturationn
+        # Gas saturation
         X_s = self.obl.sampled_could.point_data["Xv"]
         dX_sdz = self.obl.sampled_could.point_data["grad_Xv"][:, 0]
         dX_sdH = self.obl.sampled_could.point_data["grad_Xv"][:, 1]
@@ -388,5 +388,5 @@ class SecondaryEquations(SecondaryEquationsMixin):
             self.temperature,
             self.dependencies_of_phase_properties(rphase),  # since same for all.
             self.temperature_func,
-            subdomains + matrix_boundary,
+            subdomains,
         )

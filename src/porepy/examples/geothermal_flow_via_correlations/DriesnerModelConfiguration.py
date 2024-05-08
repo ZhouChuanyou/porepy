@@ -1,6 +1,6 @@
 import BrineConstitutiveDescription
 import numpy as np
-from Geometries import Benchmark2DC3 as ModelGeometry
+from Geometries import SimpleGeometry as ModelGeometry
 
 import porepy as pp
 import porepy.composite as ppc
@@ -38,8 +38,8 @@ class BoundaryConditions(BoundaryConditionsCF):
 
     def bc_values_enthalpy(self, boundary_grid: pp.BoundaryGrid) -> np.ndarray:
         inlet_idx, _ = self.get_inlet_outlet_sides(boundary_grid)
-        h_init = 2.0e6
-        h_inlet = 2.0e6
+        h_init = 1.5e6
+        h_inlet = 1.5e6
         h = h_init * np.ones(boundary_grid.num_cells)
         h[inlet_idx] = h_inlet
         return h
@@ -48,7 +48,7 @@ class BoundaryConditions(BoundaryConditionsCF):
         self, component: ppc.Component, boundary_grid: pp.BoundaryGrid
     ) -> np.ndarray:
         inlet_idx, _ = self.get_inlet_outlet_sides(boundary_grid)
-        z_init = 0.15
+        z_init = 0.1
         z_inlet = 0.05
         if component.name == "H2O":
             z_H2O = (1 - z_init) * np.ones(boundary_grid.num_cells)
@@ -60,15 +60,16 @@ class BoundaryConditions(BoundaryConditionsCF):
             return z_NaCl
 
     def bc_values_temperature(self, boundary_grid: pp.BoundaryGrid) -> np.ndarray:
-        # # adhoc functional programming for BC consistency
-        p = self.bc_values_pressure(boundary_grid)
-        h = self.bc_values_enthalpy(boundary_grid)
-        z_NaCl = self.bc_values_overall_fraction(
-            self.fluid_mixture._components[1], boundary_grid
-        )
-        par_points = np.array((z_NaCl, h, p)).T
-        self.obl.sample_at(par_points)
-        T = self.obl.sampled_could.point_data["Temperature"]
+        # # # adhoc functional programming for BC consistency
+        # p = self.bc_values_pressure(boundary_grid)
+        # h = self.bc_values_enthalpy(boundary_grid)
+        # z_NaCl = self.bc_values_overall_fraction(
+        #     self.fluid_mixture._components[1], boundary_grid
+        # )
+        # par_points = np.array((z_NaCl, h, p)).T
+        # self.obl.sample_at(par_points)
+        # T = self.obl.sampled_could.point_data["Temperature"]
+        T = self.initial_temperature(boundary_grid)
         return T
 
 
@@ -80,13 +81,13 @@ class InitialConditions(InitialConditionsCF):
         return np.ones(sd.num_cells) * p_init
 
     def initial_enthalpy(self, sd: pp.Grid) -> np.ndarray:
-        h = 2.0e6
+        h = 1.5e6
         return np.ones(sd.num_cells) * h
 
     def initial_overall_fraction(
         self, component: ppc.Component, sd: pp.Grid
     ) -> np.ndarray:
-        z = 0.15
+        z = 0.1
         if component.name == "H2O":
             return (1 - z) * np.ones(sd.num_cells)
         else:
@@ -138,7 +139,7 @@ class DriesnerBrineFlowModel(
     CFModelMixin,
 ):
     def relative_permeability(self, saturation: pp.ad.Operator) -> pp.ad.Operator:
-        return saturation**2
+        return saturation
 
     @property
     def obl(self):

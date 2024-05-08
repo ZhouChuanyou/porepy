@@ -33,7 +33,7 @@ import numpy as np
 
 import porepy as pp
 
-tracer_like_setting_q = True
+tracer_like_setting_q = False
 if tracer_like_setting_q:
     from TracerModelConfiguration import TracerFlowModel as FlowModel
 else:
@@ -43,7 +43,7 @@ else:
 day = 86400
 t_scale = 0.00001
 time_manager = pp.TimeManager(
-    schedule=[0.0, 100.0 * day * t_scale],
+    schedule=[0.0, 10.0 * day * t_scale],
     dt_init=1.0 * day * t_scale,
     constant_dt=True,
     iter_max=50,
@@ -61,35 +61,31 @@ params = {
     "time_manager": time_manager,
     "prepare_simulation": False,
     "reduce_linear_system_q": False,
-    "petsc_solver_q": False,
+    "petsc_solver_q": True,
     "nl_convergence_tol": 1.0e-3,
+    "nl_convergence_tol_res": 1.0e-3,
     "max_iterations": 25,
 }
 
 
 class GeothermalFlowModel(FlowModel):
 
-    def after_nonlinear_convergence(
-        self, solution: np.ndarray, errors: float, iteration_counter: int
-    ) -> None:
+    def after_nonlinear_convergence(self) -> None:
         tb = time.time()
-        res_norm = np.linalg.norm(
-            model.equation_system.assemble(evaluate_jacobian=False)
-        )
+        _, res = model.equation_system.assemble(evaluate_jacobian=True)
+        res_norm = np.linalg.norm(res)
         te = time.time()
         print("Elapsed time residual assemble: ", te - tb)
-        super().after_nonlinear_convergence(solution, errors, iteration_counter)
         print("Time step converged with residual norm: ", res_norm)
         print("Time value: ", self.time_manager.time)
         print("Time index: ", self.time_manager.time_index)
         print("")
-
-    def _export(self):
-        if hasattr(self, "exporter"):
-            self.exporter.write_vtu(self.primary_variable_names(), time_dependent=True)
+        super().after_nonlinear_convergence()
+        self.progress_secondary_quantities_in_time()
 
     def after_simulation(self):
         self.exporter.write_pvd()
+
 
     def solve_linear_system(self) -> np.ndarray:
         """After calling the parent method, the global solution is calculated by Schur

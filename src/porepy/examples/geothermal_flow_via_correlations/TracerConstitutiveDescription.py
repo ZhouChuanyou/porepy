@@ -408,6 +408,14 @@ class SecondaryEquations(SecondaryEquationsMixin):
         # gas phase is independent
         independent_phases = [p for p in self.fluid_mixture.phases if p != rphase]
 
+        ### Provide constitutive law for temperature
+        self.eliminate_by_constitutive_law(
+            self.temperature,
+            self.dependencies_of_phase_properties(rphase),  # since same for all.
+            temperature_func,
+            subdomains + matrix_boundary,
+        )
+
         for phase in independent_phases:
             self.eliminate_by_constitutive_law(
                 phase.saturation,  # callable giving saturation on ``subdomains``
@@ -430,10 +438,4 @@ class SecondaryEquations(SecondaryEquationsMixin):
                     subdomains + matrix_boundary,
                 )
 
-        ### Provide constitutive law for temperature
-        self.eliminate_by_constitutive_law(
-            self.temperature,
-            self.dependencies_of_phase_properties(rphase),  # since same for all.
-            temperature_func,
-            subdomains + matrix_boundary,
-        )
+

@@ -2777,9 +2777,9 @@ class SolutionStrategyCF(
         t_0 = time.time()
         reduce_linear_system_q = self.params.get("reduce_linear_system_q", False)
 
-        for name, eq in self.equation_system.equations.items():
-            res = eq.value(self.equation_system)
-            print(f"res {name}: ", np.linalg.norm(res))
+        # for name, eq in self.equation_system.equations.items():
+        #     res = eq.value(self.equation_system)
+        #     print(f"res {name}: ", np.linalg.norm(res))
         if reduce_linear_system_q:
             # TODO block diagonal inverter for secondary equations
             self.linear_system = self.equation_system.assemble_schur_complement_system(
